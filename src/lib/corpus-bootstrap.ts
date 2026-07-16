@@ -221,6 +221,7 @@ function pageSlug(path: string): string {
 
 function normalizeTitle(value: string): string {
   return value
+    .replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, "$1 $2")
     .toLowerCase()
     .replace(/[-_]+/g, " ")
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
@@ -781,28 +782,36 @@ async function resolveBootstrapTargetPaths(
   return resolved
 }
 
-function aggregateSlugs(targets: CorpusBootstrapTargetPaths): Record<string, string> {
-  return {
-    "research-landscape": pageSlug(targets.researchLandscape),
-    "method-families": pageSlug(targets.methodFamilies),
-    "constraints-and-negative-findings": pageSlug(targets.constraintsAndNegativeFindings),
-    "open-questions": pageSlug(targets.openQuestions),
-  }
-}
-
 function rewriteAggregateLinks(
   markdown: string,
   targets: CorpusBootstrapTargetPaths,
 ): string {
-  let rewritten = markdown
-  for (const [canonical, actual] of Object.entries(aggregateSlugs(targets))) {
-    const escaped = canonical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    rewritten = rewritten.replace(
-      new RegExp(`\\[\\[${escaped}(\\|[^\\]]+)?\\]\\]`, "gi"),
-      (_match, alias: string | undefined) => `[[${actual}${alias ?? ""}]]`,
-    )
+  const replacements = new Map<string, string>()
+  for (const [key, definition] of Object.entries(TARGET_DEFINITIONS) as Array<
+    [keyof typeof TARGET_DEFINITIONS, typeof TARGET_DEFINITIONS[keyof typeof TARGET_DEFINITIONS]]
+  >) {
+    if (key === "overview") continue
+    const actual = pageSlug(targets[key])
+    const aliases = [
+      key,
+      pageSlug(definition.path),
+      actual,
+      ...(definition.aliases as readonly string[]),
+    ]
+    for (const alias of aliases) replacements.set(normalizeTitle(alias), actual)
   }
-  return rewritten
+  return markdown.replace(
+    /\[\[([^\]|\n]+)(\|[^\]\n]*)?\]\]/g,
+    (match, rawTarget: string, alias: string | undefined) => {
+      const target = rawTarget
+        .trim()
+        .split("/")
+        .pop()!
+        .replace(/\.md$/i, "")
+      const actual = replacements.get(normalizeTitle(target))
+      return actual ? `[[${actual}${alias ?? ""}]]` : match
+    },
+  )
 }
 
 function ensureSectionEvidence(

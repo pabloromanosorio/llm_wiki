@@ -456,7 +456,7 @@ describe("corpus bootstrap writes", () => {
           methodFamilies: "## Method families\nBounded passes are central.",
           constraintsAndNegativeFindings: "## Constraints\nEvidence from [[paper-a]].",
           openQuestions: "## Open questions\nWhat should follow [[method-a]]?",
-          overview: "Start with [[research-landscape]], [[method-families]], [[constraints-and-negative-findings]], and [[open-questions]].",
+          overview: "Start with [[researchLandscape]], [[methodFamilies]], [[constraintsAndNegativeFindings]], and [[openQuestions]].",
           reviews: [{
             type: "contradiction",
             title: "Resolve corpus tension",
@@ -489,6 +489,10 @@ describe("corpus bootstrap writes", () => {
     expect(disk.has("/project/wiki/synthesis/research-landscape.md")).toBe(false)
     expect(disk.has("/project/wiki/queries/open-questions.md")).toBe(false)
     expect(disk.get("/project/wiki/overview.md")).toContain("[[literature-landscape]]")
+    expect(disk.get("/project/wiki/overview.md")).toContain("[[method-families]]")
+    expect(disk.get("/project/wiki/overview.md")).toContain("[[limitations-and-negative-results]]")
+    expect(disk.get("/project/wiki/overview.md")).toContain("[[unresolved-research-questions]]")
+    expect(disk.get("/project/wiki/overview.md")).not.toMatch(/\[\[[^\]]*[A-Z][^\]]*\]\]/)
     expect(disk.get("/project/wiki/synthesis/method-families.md")).toContain("Evidence:")
     expect(disk.get("/project/wiki/synthesis/literature-landscape.md"))
       .toContain("Evidence: [[method-a]], [[paper-a]].")
