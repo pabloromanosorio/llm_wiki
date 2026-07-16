@@ -78,6 +78,9 @@ const mocks = vi.hoisted(() => {
       children?: Array<{ name: string; path: string; is_dir: boolean }>
     }>),
     readFile: vi.fn(async (_path?: string) => ""),
+    getFileMd5: vi.fn(async (_path?: string) => "fingerprint"),
+    createDirectory: vi.fn(async () => undefined),
+    writeFileAtomic: vi.fn(async () => undefined),
     getFileSize: vi.fn(async (_path?: string) => 1024),
     fileExists: vi.fn(async (_path?: string) => false),
     writeFile: vi.fn(async () => undefined),
@@ -107,6 +110,9 @@ vi.mock("@/commands/file-sync", () => ({
 vi.mock("@/commands/fs", () => ({
   listDirectory: mocks.listDirectory,
   readFile: mocks.readFile,
+  getFileMd5: mocks.getFileMd5,
+  createDirectory: mocks.createDirectory,
+  writeFileAtomic: mocks.writeFileAtomic,
   getFileSize: mocks.getFileSize,
   fileExists: mocks.fileExists,
   writeFile: mocks.writeFile,
@@ -148,6 +154,9 @@ describe("project file sync", () => {
     })
     mocks.listDirectory.mockImplementation(async (_path?: string) => [])
     mocks.readFile.mockImplementation(async (_path?: string) => "")
+    mocks.getFileMd5.mockImplementation(async (_path?: string) => "fingerprint")
+    mocks.createDirectory.mockImplementation(async () => undefined)
+    mocks.writeFileAtomic.mockImplementation(async () => undefined)
     mocks.getFileSize.mockImplementation(async (_path?: string) => 1024)
     mocks.fileExists.mockImplementation(async (_path?: string) => false)
     mocks.writeFile.mockImplementation(async () => undefined)
@@ -254,6 +263,45 @@ describe("project file sync", () => {
     expect(mocks.enqueueBatch).toHaveBeenCalledWith("A", [
       { sourcePath: "raw/sources/report.pdf", folderContext: "" },
     ])
+  })
+
+  it("registers watched Research sources without starting ingest", async () => {
+    vi.useFakeTimers()
+    const { startProjectFileSync } = await import("@/lib/project-file-sync")
+    const { useWikiStore } = await import("@/stores/wiki-store")
+
+    const project = { id: "A", name: "Research", path: "/tmp/a" }
+    useWikiStore.getState().setProject(project)
+    mocks.readFile.mockImplementation(async (path?: string) => {
+      if (path === "/tmp/a/schema.md") {
+        return "# Wiki Schema — Research Deep-Dive"
+      }
+      throw new Error("missing")
+    })
+    void startProjectFileSync(project)
+    await vi.waitFor(() => expect(mocks.listen).toHaveBeenCalledTimes(2))
+
+    mocks.emit("file-sync://changed", {
+      projectId: "A",
+      tasks: [{
+        id: "research-source",
+        projectId: "A",
+        path: "raw/sources/paper.pdf",
+        kind: "created",
+        status: "done",
+        createdAt: 1,
+        updatedAt: 1,
+        retryCount: 0,
+        needsRerun: false,
+      }],
+    })
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(mocks.enqueueBatch).not.toHaveBeenCalled()
+    expect(mocks.writeFileAtomic).toHaveBeenCalledWith(
+      "/tmp/a/.llm-wiki/research-candidates.json",
+      expect.stringContaining('"status": "registered"'),
+    )
   })
 
   it("migrates an unchanged source move without deleting or re-ingesting it", async () => {

@@ -10,8 +10,9 @@ const mocks = vi.hoisted(() => ({
   preprocessFile: vi.fn(),
   readFile: vi.fn(),
   writeFileAtomic: vi.fn(),
-  enqueueSourceIngest: vi.fn(),
+  intakeSourcePaths: vi.fn(),
   isIngestableSourcePath: vi.fn(),
+  shouldScreenSourceIntake: vi.fn(),
   loadScheduledImportConfig: vi.fn(),
   saveScheduledImportConfig: vi.fn(),
 }))
@@ -28,8 +29,9 @@ vi.mock("@/commands/fs", () => ({
 }))
 
 vi.mock("@/lib/source-lifecycle", () => ({
-  enqueueSourceIngest: mocks.enqueueSourceIngest,
+  intakeSourcePaths: mocks.intakeSourcePaths,
   isIngestableSourcePath: mocks.isIngestableSourcePath,
+  shouldScreenSourceIntake: mocks.shouldScreenSourceIntake,
 }))
 
 vi.mock("@/lib/project-store", () => ({
@@ -182,6 +184,8 @@ describe("scanAndImport failure handling", () => {
     mocks.copyFile.mockResolvedValue(undefined)
     mocks.preprocessFile.mockResolvedValue("")
     mocks.isIngestableSourcePath.mockReturnValue(true)
+    mocks.shouldScreenSourceIntake.mockResolvedValue(false)
+    mocks.intakeSourcePaths.mockResolvedValue(["task-1"])
     mocks.loadScheduledImportConfig.mockResolvedValue({
       enabled: true,
       path: "/Users/me/inbox",
@@ -205,13 +209,29 @@ describe("scanAndImport failure handling", () => {
   })
 
   it("does not mark changed files imported when enqueue fails", async () => {
-    mocks.enqueueSourceIngest.mockRejectedValue(new Error("queue stopped"))
+    mocks.intakeSourcePaths.mockRejectedValue(new Error("queue stopped"))
 
     await scanAndImport(project, "/Users/me/inbox")
 
     expect(mocks.copyFile).toHaveBeenCalled()
-    expect(mocks.enqueueSourceIngest).toHaveBeenCalled()
+    expect(mocks.intakeSourcePaths).toHaveBeenCalled()
     expect(mocks.writeFileAtomic).not.toHaveBeenCalled()
+  })
+
+  it("registers scheduled Research candidates without preprocessing or ingest", async () => {
+    mocks.shouldScreenSourceIntake.mockResolvedValue(true)
+    mocks.intakeSourcePaths.mockResolvedValue(["candidate-1"])
+
+    await scanAndImport(project, "/Users/me/inbox")
+
+    expect(mocks.preprocessFile).not.toHaveBeenCalled()
+    expect(mocks.intakeSourcePaths).toHaveBeenCalledWith(
+      project,
+      ["/Users/me/wiki-project/raw/sources/scheduled-import/paper.pdf"],
+      expect.any(Object),
+      { mode: "screen" },
+    )
+    expect(mocks.writeFileAtomic).toHaveBeenCalled()
   })
 
   it("does not leave the scanner locked after a managed project path is skipped", async () => {
@@ -229,15 +249,16 @@ describe("scanAndImport failure handling", () => {
     mocks.getFileMd5
       .mockRejectedValueOnce(new Error("sharing violation"))
       .mockResolvedValueOnce("ok-md5")
-    mocks.enqueueSourceIngest.mockResolvedValue(["task-1"])
+    mocks.intakeSourcePaths.mockResolvedValue(["task-1"])
 
     await scanAndImport(project, "/Users/me/inbox")
 
     expect(mocks.copyFile).toHaveBeenCalledTimes(1)
-    expect(mocks.enqueueSourceIngest).toHaveBeenCalledWith(
+    expect(mocks.intakeSourcePaths).toHaveBeenCalledWith(
       project,
       ["/Users/me/wiki-project/raw/sources/scheduled-import/ok.pdf"],
       expect.any(Object),
+      { mode: "auto" },
     )
     expect(mocks.writeFileAtomic).toHaveBeenCalled()
   })
@@ -249,7 +270,7 @@ describe("scanAndImport failure handling", () => {
 
     expect(mocks.getFileMd5).not.toHaveBeenCalled()
     expect(mocks.copyFile).not.toHaveBeenCalled()
-    expect(mocks.enqueueSourceIngest).not.toHaveBeenCalled()
+    expect(mocks.intakeSourcePaths).not.toHaveBeenCalled()
   })
 
   it("does not copy unattended json/yaml/xml config files", async () => {
@@ -257,7 +278,7 @@ describe("scanAndImport failure handling", () => {
       { name: "secrets.yaml", path: "/Users/me/inbox/secrets.yaml", is_dir: false },
       { name: "notes.md", path: "/Users/me/inbox/notes.md", is_dir: false },
     ])
-    mocks.enqueueSourceIngest.mockResolvedValue(["task-1"])
+    mocks.intakeSourcePaths.mockResolvedValue(["task-1"])
 
     await scanAndImport(project, "/Users/me/inbox")
 
@@ -267,10 +288,11 @@ describe("scanAndImport failure handling", () => {
       "/Users/me/wiki-project/raw/sources/scheduled-import/notes.md",
     )
     expect(mocks.copyFile).not.toHaveBeenCalledWith("/Users/me/inbox/secrets.yaml", expect.anything())
-    expect(mocks.enqueueSourceIngest).toHaveBeenCalledWith(
+    expect(mocks.intakeSourcePaths).toHaveBeenCalledWith(
       project,
       ["/Users/me/wiki-project/raw/sources/scheduled-import/notes.md"],
       expect.any(Object),
+      { mode: "auto" },
     )
   })
 })

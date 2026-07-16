@@ -17,8 +17,9 @@ import {
   saveScheduledImportConfig,
 } from "@/lib/project-store"
 import {
-  enqueueSourceIngest,
+  intakeSourcePaths,
   isIngestableSourcePath,
+  shouldScreenSourceIntake,
 } from "@/lib/source-lifecycle"
 import { useActivityStore } from "@/stores/activity-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
@@ -407,9 +408,14 @@ export async function scanAndImport(
 
     if (changedFiles.length > 0) {
       const destPaths = changedFiles.map((file) => file.destPath)
-      await Promise.all(destPaths.map((path) => preprocessFile(path).catch(() => {})))
+      const screenCandidates = await shouldScreenSourceIntake(project)
+      if (!screenCandidates) {
+        await Promise.all(destPaths.map((path) => preprocessFile(path).catch(() => {})))
+      }
       if (isCurrentRun(project.id, options.runId)) {
-        const ids = await enqueueSourceIngest(project, destPaths, llmConfig)
+        const ids = await intakeSourcePaths(project, destPaths, llmConfig, {
+          mode: screenCandidates ? "screen" : "auto",
+        })
         if (ids.length > 0) {
           for (const file of changedFiles) {
             nextDb.files[file.key] = file.md5

@@ -629,6 +629,7 @@ pub fn run() {
             commands::fs::list_directory,
             commands::fs::copy_file,
             commands::fs::copy_directory,
+            commands::fs::read_file_excerpt,
             commands::fs::preprocess_file,
             commands::fs::delete_file,
             commands::fs::find_related_wiki_pages,

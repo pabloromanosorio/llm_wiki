@@ -19,6 +19,17 @@ export async function readFile(
   })
 }
 
+export async function readFileExcerpt(
+  path: string,
+  options?: { maxChars?: number; maxPdfPages?: number },
+): Promise<string> {
+  return invoke<string>("read_file_excerpt", {
+    path,
+    maxChars: options?.maxChars,
+    maxPdfPages: options?.maxPdfPages,
+  })
+}
+
 export async function writeFile(path: string, contents: string): Promise<void> {
   assertAbsoluteFsPath("writeFile", path)
   return invoke<void>("write_file", { path, contents })

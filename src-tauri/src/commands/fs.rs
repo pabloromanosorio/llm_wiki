@@ -119,6 +119,109 @@ pub async fn read_file(path: String, extract_images: Option<bool>) -> Result<Str
     .map_err(|e| format!("read_file blocking task join error: {e}"))?
 }
 
+fn truncate_chars(value: String, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value
+    } else {
+        value.chars().take(max_chars).collect()
+    }
+}
+
+fn extract_pdf_text_excerpt(
+    path: &str,
+    max_pages: usize,
+    max_chars: usize,
+) -> Result<String, String> {
+    let _guard = lock_pdfium();
+    let pdfium = pdfium()?;
+    let doc = pdfium
+        .load_pdf_from_file(path, None)
+        .map_err(|e| format!("Failed to open PDF '{path}': {e}"))?;
+    let mut out = String::new();
+    for (page_idx, page) in doc.pages().iter().take(max_pages).enumerate() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&format!("## Page {}\n\n", page_idx + 1));
+        let text = page
+            .text()
+            .map_err(|e| format!("Page {} text extraction failed in '{path}': {e}", page_idx + 1))?;
+        out.push_str(&text.all());
+        if out.chars().count() >= max_chars {
+            break;
+        }
+    }
+    Ok(truncate_chars(out, max_chars))
+}
+
+fn read_text_excerpt(path: &str, max_chars: usize) -> Result<String, String> {
+    let mut file = fs::File::open(path)
+        .map_err(|e| format!("Failed to open file '{path}': {e}"))?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((max_chars.saturating_mul(4)) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("Failed to read file '{path}': {e}"))?;
+    Ok(truncate_chars(
+        String::from_utf8_lossy(&bytes).into_owned(),
+        max_chars,
+    ))
+}
+
+/// Read a bounded local excerpt for candidate screening without populating the
+/// ingest cache or walking an entire PDF.
+#[tauri::command]
+pub async fn read_file_excerpt(
+    path: String,
+    max_chars: Option<usize>,
+    max_pdf_pages: Option<usize>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_guarded("read_file_excerpt", || {
+            let p = Path::new(&path);
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let max_chars = max_chars.unwrap_or(14_000).clamp(1_000, 100_000);
+            let max_pdf_pages = max_pdf_pages.unwrap_or(2).clamp(1, 10);
+            let extracted = match ext.as_str() {
+                "pdf" => return extract_pdf_text_excerpt(&path, max_pdf_pages, max_chars),
+                e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e)?,
+                e if EBOOK_EXTS.contains(&e) => {
+                    crate::commands::ebook::extract_ebook_text(&path, e)?
+                }
+                e if IMAGE_EXTS.contains(&e) => {
+                    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    format!(
+                        "[Image: {} ({:.1} KB)]",
+                        p.file_name().unwrap_or_default().to_string_lossy(),
+                        size as f64 / 1024.0,
+                    )
+                }
+                e if MEDIA_EXTS.contains(&e) => {
+                    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    format!(
+                        "[Media: {} ({:.1} MB)]",
+                        p.file_name().unwrap_or_default().to_string_lossy(),
+                        size as f64 / 1048576.0,
+                    )
+                }
+                e if LEGACY_DOC_EXTS.contains(&e) => format!(
+                    "[Document: {} — text extraction not supported for .{} format]",
+                    p.file_name().unwrap_or_default().to_string_lossy(),
+                    e,
+                ),
+                _ => return read_text_excerpt(&path, max_chars),
+            };
+            Ok(truncate_chars(extracted, max_chars))
+        })
+    })
+    .await
+    .map_err(|e| format!("read_file_excerpt blocking task join error: {e}"))?
+}
+
 /// Pre-process a file and cache the extracted text.
 #[tauri::command]
 pub async fn preprocess_file(path: String) -> Result<String, String> {
@@ -1881,6 +1984,29 @@ mod tests {
         )
         .await;
         assert!(result.is_err() || result.is_ok()); // must at least return
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn read_file_excerpt_bounds_plain_text_without_rewriting_it() {
+        let path = std::env::temp_dir().join(format!(
+            "research-screening-excerpt-{}.txt",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(&path, "a".repeat(2_000)).unwrap();
+
+        let result = read_file_excerpt(
+            path.to_string_lossy().to_string(),
+            Some(1_000),
+            Some(2),
+        )
+        .await
+        .unwrap();
+
+        let _ = fs::remove_file(&path);
+        assert_eq!(result.chars().count(), 1_000);
     }
 
     #[test]

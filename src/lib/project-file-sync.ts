@@ -15,7 +15,7 @@ import type { FileChangeTask } from "@/commands/file-sync"
 import {
   cleanupDeletedWikiPages,
   deleteSourceFiles,
-  enqueueSourceIngest,
+  intakeSourcePaths,
   isIngestableSourcePath,
   migrateSourcePath,
 } from "@/lib/source-lifecycle"
@@ -268,7 +268,7 @@ async function enqueueRawSourceChanges(project: WikiProject, tasks: FileChangeTa
   if (paths.length === 0) return
 
   try {
-    await enqueueSourceIngest(project, paths, useWikiStore.getState().llmConfig)
+    await intakeSourcePaths(project, paths, useWikiStore.getState().llmConfig)
   } catch (err) {
     console.error("[file-sync] failed to enqueue raw source ingest:", err)
   }

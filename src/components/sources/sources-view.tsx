@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
-import { Plus, FileText, RefreshCw, BookOpen, Trash2, Folder, ChevronRight, ChevronDown, Link } from "lucide-react"
+import { Plus, FileText, RefreshCw, BookOpen, Trash2, Folder, ChevronRight, ChevronDown, Link, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -23,6 +23,13 @@ import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { importSourceUrls, parseImportUrls, type UrlImportResult } from "@/lib/url-source-import"
+import { isResearchProject } from "@/lib/project-profile"
+import { ResearchCandidatePanel } from "@/components/sources/research-candidate-panel"
+import {
+  loadResearchCandidates,
+  setResearchCandidateDecision,
+} from "@/lib/research-candidate-store"
+import { enqueueIncludedResearchCandidates } from "@/lib/research-candidate-queue"
 
 const SOURCE_TREE_INITIAL_ROWS = 160
 const SOURCE_TREE_LOAD_BATCH = 160
@@ -45,6 +52,8 @@ export function SourcesView() {
   const [urlInput, setUrlInput] = useState("")
   const [urlError, setUrlError] = useState<string | null>(null)
   const [urlResults, setUrlResults] = useState<UrlImportResult[]>([])
+  const [researchProject, setResearchProject] = useState(false)
+  const [candidateRefreshKey, setCandidateRefreshKey] = useState(0)
   /**
    * Path of the source-tree node currently in "click again to
    * confirm delete" state. Lifted up here (rather than living
@@ -85,6 +94,20 @@ export function SourcesView() {
     loadSources()
   }, [loadSources, dataVersion])
 
+  useEffect(() => {
+    let active = true
+    if (!project) {
+      setResearchProject(false)
+      return
+    }
+    void isResearchProject(project.path).then((result) => {
+      if (active) setResearchProject(result)
+    })
+    return () => {
+      active = false
+    }
+  }, [project])
+
   async function handleRefreshSources() {
     if (!project || refreshing) return
     setRefreshing(true)
@@ -100,7 +123,7 @@ export function SourcesView() {
     }
   }
 
-  async function handleImport() {
+  async function handleImport(mode: "auto" | "ingest" = "auto") {
     if (!project) return
 
     const selected = await open({
@@ -144,8 +167,9 @@ export function SourcesView() {
     setImporting(true)
     const paths = Array.isArray(selected) ? selected : [selected]
     try {
-      await importSourceFiles(project, paths, llmConfig, sourceWatchConfig)
+      await importSourceFiles(project, paths, llmConfig, sourceWatchConfig, { mode })
       await loadSources()
+      setCandidateRefreshKey((value) => value + 1)
     } finally {
       setImporting(false)
     }
@@ -165,6 +189,7 @@ export function SourcesView() {
     try {
       await importSourceFolder(project, selected, llmConfig, sourceWatchConfig)
       await loadSources()
+      setCandidateRefreshKey((value) => value + 1)
     } catch (err) {
       console.error(`Failed to import folder:`, err)
     } finally {
@@ -189,6 +214,7 @@ export function SourcesView() {
       const results = await importSourceUrls(project, urls, llmConfig, sourceWatchConfig)
       setUrlResults(results)
       await loadSources()
+      setCandidateRefreshKey((value) => value + 1)
       if (results.every((result) => result.path && !result.error)) setUrlInput("")
     } finally {
       setImporting(false)
@@ -279,6 +305,19 @@ export function SourcesView() {
     // who expected a fresh-import re-run. One button, one path now.
     setIngestingPath(node.path)
     try {
+      if (researchProject) {
+        const pp = normalizePath(project.path).replace(/\/+$/, "")
+        const path = normalizePath(node.path)
+        const relativePath = path.startsWith(`${pp}/`) ? path.slice(pp.length + 1) : path
+        const candidate = (await loadResearchCandidates(project.path)).find((item) =>
+          normalizePath(item.source.path).toLowerCase() === relativePath.toLowerCase())
+        if (candidate) {
+          await setResearchCandidateDecision(project.path, [candidate.id], "include")
+          await enqueueIncludedResearchCandidates(project, llmConfig, [candidate.id])
+          setCandidateRefreshKey((value) => value + 1)
+          return
+        }
+      }
       await enqueueSourceIngest(project, [node.path], llmConfig)
     } catch (err) {
       console.error("Failed to enqueue ingest:", err)
@@ -311,10 +350,16 @@ export function SourcesView() {
               {t("sources.refreshFolderTooltip")}
             </TooltipContent>
           </Tooltip>
-          <Button size="sm" onClick={handleImport} disabled={importing}>
+          <Button size="sm" onClick={() => void handleImport()} disabled={importing}>
             <Plus className="mr-1 h-4 w-4" />
             {importing ? t("sources.importing") : t("sources.import")}
           </Button>
+          {researchProject && (
+            <Button variant="outline" size="sm" onClick={() => void handleImport("ingest")} disabled={importing}>
+              <Zap className="mr-1 h-4 w-4" />
+              {t("sources.importAndIngestNow")}
+            </Button>
+          )}
           <Button size="sm" onClick={handleImportFolder} disabled={importing}>
             <Plus className="mr-1 h-4 w-4" />
             {t("sources.importFolder", "Folder")}
@@ -330,7 +375,11 @@ export function SourcesView() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("sources.urlImport.title")}</DialogTitle>
-            <DialogDescription>{t("sources.urlImport.description")}</DialogDescription>
+            <DialogDescription>
+              {t(researchProject
+                ? "sources.urlImport.descriptionResearch"
+                : "sources.urlImport.description")}
+            </DialogDescription>
           </DialogHeader>
           <textarea
             className="min-h-44 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -365,6 +414,14 @@ export function SourcesView() {
         </DialogContent>
       </Dialog>
 
+      {researchProject && project && (
+        <ResearchCandidatePanel
+          project={project}
+          llmConfig={llmConfig}
+          refreshKey={candidateRefreshKey + dataVersion}
+        />
+      )}
+
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         {refreshError && (
           <div className="mx-4 mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -379,7 +436,7 @@ export function SourcesView() {
             <p>{t("sources.noSources")}</p>
             <p>{t("sources.importHint")}</p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleImport}>
+              <Button variant="outline" size="sm" onClick={() => void handleImport()}>
                 <Plus className="mr-1 h-4 w-4" />
                 {t("sources.importFiles")}
               </Button>

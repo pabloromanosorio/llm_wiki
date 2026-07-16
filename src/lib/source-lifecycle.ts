@@ -39,6 +39,12 @@ import { isPathAllowedBySourceWatch, normalizeSourceWatchConfig } from "@/lib/so
 import { isSensitiveConfigSourceFile } from "@/lib/source-filter"
 import { naturalCompare } from "@/lib/natural-sort"
 import type { SourceWatchConfig } from "@/stores/wiki-store"
+import { isResearchProject } from "@/lib/project-profile"
+import {
+  migrateResearchCandidatePath,
+  registerResearchCandidatePaths,
+  removeResearchCandidatesByPaths,
+} from "@/lib/research-candidate-store"
 
 export const INGESTABLE_SOURCE_EXTENSIONS = new Set([
   "md",
@@ -192,6 +198,11 @@ export async function migrateSourcePath(
       summaryMoves.set(oldSummaryRel, newSummaryRel)
     }
     await moveIngestCacheEntry(pp, oldIdentity, newIdentity, summaryMoves)
+    try {
+      await migrateResearchCandidatePath(pp, oldIdentity, newIdentity)
+    } catch (err) {
+      console.warn("[source-lifecycle] failed to migrate Research candidate path:", err)
+    }
     return writes.length
   } catch (err) {
     if (newSummaryCreated) {
@@ -258,14 +269,53 @@ export async function enqueueSourceIngest(
   return enqueueBatch(project.id, files)
 }
 
+export interface SourceIntakeOptions {
+  mode?: "auto" | "screen" | "ingest"
+  sourceRoot?: string
+  rootContext?: string
+  sourceOptions?: Record<string, { kind?: "file" | "url"; value?: string }>
+}
+
+export async function shouldScreenSourceIntake(
+  project: WikiProject,
+  mode: SourceIntakeOptions["mode"] = "auto",
+): Promise<boolean> {
+  return mode === "screen"
+    || (mode !== "ingest" && await isResearchProject(project.path))
+}
+
+export async function intakeSourcePaths(
+  project: WikiProject,
+  sourcePaths: string[],
+  llmConfig: LlmConfig,
+  options: SourceIntakeOptions = {},
+): Promise<string[]> {
+  const mode = options.mode ?? "auto"
+  const shouldScreen = await shouldScreenSourceIntake(project, mode)
+  if (shouldScreen) {
+    const candidates = await registerResearchCandidatePaths(
+      project,
+      sourcePaths,
+      options.sourceOptions ?? {},
+    )
+    return candidates.map((candidate) => candidate.id)
+  }
+  return enqueueSourceIngest(project, sourcePaths, llmConfig, {
+    sourceRoot: options.sourceRoot,
+    rootContext: options.rootContext,
+  })
+}
+
 export async function importSourceFiles(
   project: WikiProject,
   sourcePaths: string[],
   llmConfig: LlmConfig,
   sourceWatchConfig?: SourceWatchConfig,
+  intakeOptions: Pick<SourceIntakeOptions, "mode"> = {},
 ): Promise<string[]> {
   const pp = normalizePath(project.path)
   const importedPaths: string[] = []
+  const screenCandidates = await shouldScreenSourceIntake(project, intakeOptions.mode)
   const cfg = normalizeSourceWatchConfig(sourceWatchConfig)
   // Explicit file selection is user intent, so the watcher's allow-list must
   // not silently reject a newly supported format from an older persisted
@@ -294,13 +344,16 @@ export async function importSourceFiles(
     try {
       await copyFile(sourcePath, destPath)
       importedPaths.push(destPath)
-      preprocessFile(destPath).catch(() => {})
+      if (!screenCandidates) preprocessFile(destPath).catch(() => {})
     } catch (err) {
       console.error(`Failed to import ${originalName}:`, err)
     }
   }
 
-  await enqueueSourceIngest(project, importedPaths, llmConfig)
+  await intakeSourcePaths(project, importedPaths, llmConfig, {
+    ...intakeOptions,
+    mode: screenCandidates ? "screen" : intakeOptions.mode,
+  })
 
   return importedPaths
 }
@@ -310,6 +363,7 @@ export async function importSourceFolder(
   selectedFolder: string,
   llmConfig: LlmConfig,
   sourceWatchConfig?: SourceWatchConfig,
+  intakeOptions: Pick<SourceIntakeOptions, "mode"> = {},
 ): Promise<string[]> {
   const pp = normalizePath(project.path)
   const sourceRoot = normalizePath(selectedFolder)
@@ -319,6 +373,7 @@ export async function importSourceFolder(
   const folderName = getFileName(selectedFolder) || "imported"
   const destDir = `${pp}/raw/sources/${folderName}`
   const cfg = normalizeSourceWatchConfig(sourceWatchConfig)
+  const screenCandidates = await shouldScreenSourceIntake(project, intakeOptions.mode)
   const maxBytes = cfg.maxFileSizeMb * 1024 * 1024
   const allowedFiles: string[] = []
   // include hidden: a user importing a folder into raw/sources may
@@ -347,19 +402,19 @@ export async function importSourceFolder(
     if (parent) await createDirectory(parent)
     await copyFile(file.path, destPath)
     allowedFiles.push(destPath)
-    preprocessFile(destPath).catch(() => {})
+    if (!screenCandidates) preprocessFile(destPath).catch(() => {})
   }
 
   const naturallyOrderedFiles = [...allowedFiles].sort((a, b) =>
     naturalCompare(getRelativePath(a, destDir), getRelativePath(b, destDir)),
   )
 
-  if (hasUsableLlm(getTaskLlmConfig("ingest", llmConfig))) {
-    await enqueueSourceIngest(project, naturallyOrderedFiles, llmConfig, {
-      sourceRoot: destDir,
-      rootContext: folderName,
-    })
-  }
+  await intakeSourcePaths(project, naturallyOrderedFiles, llmConfig, {
+    ...intakeOptions,
+    mode: screenCandidates ? "screen" : intakeOptions.mode,
+    sourceRoot: destDir,
+    rootContext: folderName,
+  })
 
   return naturallyOrderedFiles
 }
@@ -480,6 +535,14 @@ export async function deleteSourceFiles(
     deletedWikiCount: deletedWikiPaths.length,
     keptWikiCount: rewrittenSourcePages,
   })
+  try {
+    await removeResearchCandidatesByPaths(
+      pp,
+      sourceInfos.map((info) => info.identity),
+    )
+  } catch (err) {
+    console.warn("[source-lifecycle] failed to remove deleted Research candidates:", err)
+  }
 
   if (skippedPages > 0) {
     console.debug(

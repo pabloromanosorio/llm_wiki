@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   listDirectory: vi.fn(),
   preprocessFile: vi.fn(),
   enqueueBatch: vi.fn(),
+  isResearchProject: vi.fn(),
+  registerResearchCandidatePaths: vi.fn(),
+  migrateResearchCandidatePath: vi.fn(),
+  removeResearchCandidatesByPaths: vi.fn(),
 }))
 
 vi.mock("@/commands/fs", async () => {
@@ -29,11 +33,22 @@ vi.mock("@/lib/ingest-queue", () => ({
   enqueueBatch: mocks.enqueueBatch,
 }))
 
+vi.mock("@/lib/project-profile", () => ({
+  isResearchProject: mocks.isResearchProject,
+}))
+
+vi.mock("@/lib/research-candidate-store", () => ({
+  registerResearchCandidatePaths: mocks.registerResearchCandidatePaths,
+  migrateResearchCandidatePath: mocks.migrateResearchCandidatePath,
+  removeResearchCandidatesByPaths: mocks.removeResearchCandidatesByPaths,
+}))
+
 import {
   enqueueSourceIngest,
   folderContextForSourcePath,
   importSourceFiles,
   importSourceFolder,
+  intakeSourcePaths,
   isIngestableSourcePath,
 } from "./source-lifecycle"
 
@@ -47,9 +62,109 @@ beforeEach(() => {
   mocks.listDirectory.mockResolvedValue([])
   mocks.preprocessFile.mockResolvedValue("")
   mocks.enqueueBatch.mockResolvedValue(["task"])
+  mocks.isResearchProject.mockResolvedValue(false)
+  mocks.registerResearchCandidatePaths.mockResolvedValue([])
+  mocks.migrateResearchCandidatePath.mockResolvedValue([])
+  mocks.removeResearchCandidatesByPaths.mockResolvedValue([])
 })
 
 describe("source-lifecycle path helpers", () => {
+  it("registers 50 Research candidates without starting full ingest", async () => {
+    mocks.isResearchProject.mockResolvedValue(true)
+    const paths = Array.from(
+      { length: 50 },
+      (_, index) => `/project/raw/sources/paper-${index + 1}.pdf`,
+    )
+    mocks.registerResearchCandidatePaths.mockResolvedValue(
+      paths.map((path, index) => ({ id: `candidate-${index + 1}`, source: { path } })),
+    )
+
+    const ids = await intakeSourcePaths(
+      { id: "p1", name: "Research", path: "/project" },
+      paths,
+      {
+        provider: "openai",
+        endpoint: "https://api.example.com/v1",
+        apiKey: "key",
+        model: "model",
+        customModel: "",
+        reasoning: { enabled: false, effort: "low" },
+      } as never,
+    )
+
+    expect(ids).toHaveLength(50)
+    expect(mocks.registerResearchCandidatePaths).toHaveBeenCalledWith(
+      { id: "p1", name: "Research", path: "/project" },
+      paths,
+      {},
+    )
+    expect(mocks.enqueueBatch).not.toHaveBeenCalled()
+  })
+
+  it("defers preprocessing when Research files are registered for screening", async () => {
+    mocks.isResearchProject.mockResolvedValue(true)
+    mocks.registerResearchCandidatePaths.mockResolvedValue([
+      { id: "candidate-1", source: { path: "raw/sources/paper.pdf" } },
+    ])
+
+    await importSourceFiles(
+      { id: "p1", name: "Research", path: "/project" },
+      ["/external/paper.pdf"],
+      {
+        provider: "openai",
+        endpoint: "https://api.example.com/v1",
+        apiKey: "key",
+        model: "model",
+        customModel: "",
+        reasoning: { enabled: false, effort: "low" },
+      } as never,
+    )
+
+    expect(mocks.copyFile).toHaveBeenCalledOnce()
+    expect(mocks.preprocessFile).not.toHaveBeenCalled()
+    expect(mocks.enqueueBatch).not.toHaveBeenCalled()
+  })
+
+  it("preserves immediate ingest for non-Research projects", async () => {
+    const ids = await intakeSourcePaths(
+      { id: "p1", name: "General", path: "/project" },
+      ["/project/raw/sources/note.md"],
+      {
+        provider: "openai",
+        endpoint: "https://api.example.com/v1",
+        apiKey: "key",
+        model: "model",
+        customModel: "",
+        reasoning: { enabled: false, effort: "low" },
+      } as never,
+    )
+
+    expect(ids).toEqual(["task"])
+    expect(mocks.enqueueBatch).toHaveBeenCalledOnce()
+    expect(mocks.registerResearchCandidatePaths).not.toHaveBeenCalled()
+  })
+
+  it("supports an explicit Research bypass that queues ingest immediately", async () => {
+    mocks.isResearchProject.mockResolvedValue(true)
+
+    await intakeSourcePaths(
+      { id: "p1", name: "Research", path: "/project" },
+      ["/project/raw/sources/paper.pdf"],
+      {
+        provider: "openai",
+        endpoint: "https://api.example.com/v1",
+        apiKey: "key",
+        model: "model",
+        customModel: "",
+        reasoning: { enabled: false, effort: "low" },
+      } as never,
+      { mode: "ingest" },
+    )
+
+    expect(mocks.enqueueBatch).toHaveBeenCalledOnce()
+    expect(mocks.registerResearchCandidatePaths).not.toHaveBeenCalled()
+  })
+
   it("does not treat preprocessed cache files as ingestable sources", () => {
     expect(isIngestableSourcePath("raw/sources/.cache/report.pdf.txt")).toBe(false)
     expect(isIngestableSourcePath("/project/raw/sources/.cache/report.pdf.txt")).toBe(false)

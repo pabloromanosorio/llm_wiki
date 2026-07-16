@@ -3,7 +3,11 @@ import type { LlmConfig, SourceWatchConfig } from "@/stores/wiki-store"
 import type { WikiProject } from "@/types/wiki"
 import { getHttpFetch } from "@/lib/tauri-fetch"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
-import { enqueueSourceIngest, getUniqueDestPath } from "@/lib/source-lifecycle"
+import {
+  getUniqueDestPath,
+  intakeSourcePaths,
+  type SourceIntakeOptions,
+} from "@/lib/source-lifecycle"
 import { normalizePath } from "@/lib/path-utils"
 
 export const MAX_BATCH_URLS = 50
@@ -157,6 +161,7 @@ export async function importSourceUrls(
   urls: string[],
   llmConfig: LlmConfig,
   sourceWatchConfig?: SourceWatchConfig,
+  intakeOptions: Pick<SourceIntakeOptions, "mode"> = {},
 ): Promise<UrlImportResult[]> {
   const fetch = await getHttpFetch()
   const maxBytes = normalizeSourceWatchConfig(sourceWatchConfig).maxFileSizeMb * 1024 * 1024
@@ -197,11 +202,22 @@ export async function importSourceUrls(
   }
 
   try {
-    await enqueueSourceIngest(project, importedPaths, llmConfig)
+    const sourceOptions = Object.fromEntries(
+      results
+        .filter((result): result is UrlImportResult & { path: string } => Boolean(result.path))
+        .map((result) => [
+          normalizePath(result.path),
+          { kind: "url" as const, value: result.url },
+        ]),
+    )
+    await intakeSourcePaths(project, importedPaths, llmConfig, {
+      ...intakeOptions,
+      sourceOptions,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     for (const result of results) {
-      if (result.path) result.error = `Saved, but failed to queue ingest: ${message}`
+      if (result.path) result.error = `Saved, but failed to register or queue: ${message}`
     }
   }
   return results
