@@ -227,6 +227,14 @@
         "high": "High"
       }
     },
+    "landscape": {
+      "title": "Research landscape",
+      "description": "Refresh the bounded corpus map from compiled Research pages. Uses deterministic groups and normal page merge and review behavior.",
+      "build": "Build landscape",
+      "refreshing": "Refreshing landscape...",
+      "complete": "Updated {{count}} landscape pages.",
+      "error": "Landscape refresh failed: {{error}}"
+    },
     "refresh": "Refresh",
     "refreshFolder": "Refresh folder",
     "refreshingFolder": "Refreshing...",

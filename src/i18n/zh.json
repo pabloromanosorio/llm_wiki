@@ -227,6 +227,14 @@
         "high": "高"
       }
     },
+    "landscape": {
+      "title": "研究全景",
+      "description": "从已编译的研究页面刷新有界语料地图，使用确定性分组以及正常的页面合并与审阅流程。",
+      "build": "构建研究全景",
+      "refreshing": "正在刷新研究全景……",
+      "complete": "已更新 {{count}} 个研究全景页面。",
+      "error": "研究全景刷新失败：{{error}}"
+    },
     "refresh": "刷新",
     "refreshFolder": "刷新文件夹",
     "refreshingFolder": "刷新中...",

@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { importSourceUrls, parseImportUrls, type UrlImportResult } from "@/lib/url-source-import"
 import { isResearchProject } from "@/lib/project-profile"
 import { ResearchCandidatePanel } from "@/components/sources/research-candidate-panel"
+import { ResearchLandscapeAction } from "@/components/sources/research-landscape-action"
 import {
   loadResearchCandidates,
   setResearchCandidateDecision,
@@ -415,11 +416,14 @@ export function SourcesView() {
       </Dialog>
 
       {researchProject && project && (
-        <ResearchCandidatePanel
-          project={project}
-          llmConfig={llmConfig}
-          refreshKey={candidateRefreshKey + dataVersion}
-        />
+        <>
+          <ResearchLandscapeAction project={project} llmConfig={llmConfig} />
+          <ResearchCandidatePanel
+            project={project}
+            llmConfig={llmConfig}
+            refreshKey={candidateRefreshKey + dataVersion}
+          />
+        </>
       )}
 
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">

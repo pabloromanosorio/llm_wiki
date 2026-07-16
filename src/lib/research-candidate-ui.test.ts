@@ -15,4 +15,14 @@ describe("Research candidate UI contract", () => {
     })
     expect(zh.sources.candidates.include).toBe("纳入")
   })
+
+  it("exposes the bounded Research landscape action and completion state", () => {
+    expect(en.sources.landscape).toMatchObject({
+      title: "Research landscape",
+      build: "Build landscape",
+      refreshing: "Refreshing landscape...",
+      complete: "Updated {{count}} landscape pages.",
+    })
+    expect(zh.sources.landscape.build).toBe("构建研究全景")
+  })
 })
