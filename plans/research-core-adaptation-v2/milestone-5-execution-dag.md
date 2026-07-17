@@ -80,14 +80,17 @@ Codex policy/configuration required by acceptance tests C1-C6.
 
 - C1: the installed Codex 0.142.5 strict parser accepted `.codex/config.toml`
   when the exact repository path was trusted. A live no-model MCP smoke test
-  started the built server, listed all 10 tools, and invoked
-  `llm_wiki_status` against the running desktop API.
+  started the built server, listed all 10 tools, and invoked status, project
+  listing, and project selection against the running desktop API. The desktop
+  app reported MCP enabled, LAN access disabled, and the `Workbenchis` Research
+  project pinned.
 - C2-C6: `AGENTS.md` encodes explicit project pinning, relevant triggers,
   no-load behavior, focused-before-deep retrieval, temporary-focus isolation,
-  and user-gated durable writes. The final interactive Codex behavior check is
-  externally gated because this machine currently has MCP access disabled in
-  the desktop app and trusts the parent Workbench path rather than this exact
-  Git repository.
+  and user-gated durable writes. A bounded Codex OAuth check discovered the MCP
+  server and attempted status and project-selection tools; noninteractive tool
+  execution was initially canceled by `prompt` approval mode. The final config
+  auto-approves the narrow allowlist while retaining an explicit prompt for chat,
+  which can spend provider credits. No further model call was made.
 - Native routing: a non-secret chat profile lets API/MCP chat honor supported
   HTTP task models with current provider settings. Malformed profile secrets
   are ignored, and frontend-only Codex/Claude CLI profiles safely preserve the
@@ -102,12 +105,15 @@ Codex policy/configuration required by acceptance tests C1-C6.
 ## Reconciled contradictions and deviations
 
 - The handoff and current online manual allow MCP approval mode `writes`, but
-  installed Codex 0.142.5 rejects it. The compatible safer mode is `prompt`.
+  installed Codex 0.142.5 rejects it. The compatible policy is `approve` for
+  the narrow local allowlist, with `prompt` retained specifically for chat.
 - Codex 0.142.5 requires trust for the exact Git root; trust on its parent
   Workbench directory did not activate project-local configuration.
 - The handoff template uses an absolute MCP script path. This repository uses a
-  portable project-relative command plus `cwd = ".."`, validated by Codex's
-  strict parser and the live MCP smoke test.
+  portable project-relative command and documents launching Codex at the Git
+  root. Codex 0.142.5 interprets a relative MCP `cwd` from the launch directory,
+  not from `.codex/`, so the initially proposed `cwd = ".."` was removed after
+  an actual Codex handshake exposed the mismatch.
 - Desktop chat can use Codex CLI through ChatGPT OAuth, but the Rust API Agent
   currently supports only HTTP/Ollama providers. Native task routing therefore
   falls back to the usable global backend model for CLI-only profiles rather

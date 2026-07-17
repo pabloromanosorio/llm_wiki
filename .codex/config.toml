@@ -4,13 +4,12 @@
 [mcp_servers.llm_wiki]
 command = "node"
 args = ["mcp-server/dist/src/index.js"]
-cwd = ".."
 env_vars = ["LLM_WIKI_API_TOKEN"]
 enabled = true
 required = false
 startup_timeout_sec = 20
 tool_timeout_sec = 180
-default_tools_approval_mode = "prompt"
+default_tools_approval_mode = "approve"
 
 # Deliberately read-oriented. Source rescan remains available in the server but
 # is omitted here because it changes project state and must be explicitly opted in.
@@ -25,3 +24,8 @@ enabled_tools = [
   "llm_wiki_chat",
   "llm_wiki_graph",
 ]
+
+# Chat can spend provider credits, so keep it user-gated even though the local
+# read and project-selection tools above may run without an extra prompt.
+[mcp_servers.llm_wiki.tools.llm_wiki_chat]
+approval_mode = "prompt"
