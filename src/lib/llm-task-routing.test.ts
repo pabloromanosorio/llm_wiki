@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveProjectLlmConfig, resolveTaskLlmConfig } from "./llm-task-routing"
+import { resolveProjectLlmConfig, resolveTaskLlmConfig, taskLlmProfile } from "./llm-task-routing"
 import type { LlmConfig } from "@/stores/wiki-store"
 
 const fallback: LlmConfig = {
@@ -12,6 +12,18 @@ const fallback: LlmConfig = {
 }
 
 describe("resolveTaskLlmConfig", () => {
+  it("builds a non-secret persisted profile for native chat routing", () => {
+    expect(taskLlmProfile("openai", fallback, {
+      openai: { apiKey: "chat-key", model: "gpt-4o-mini" },
+    })).toMatchObject({
+      provider: "openai",
+      model: "gpt-4o-mini",
+    })
+    expect(taskLlmProfile("openai", fallback, {
+      openai: { apiKey: "chat-key", model: "gpt-4o-mini" },
+    })).not.toHaveProperty("apiKey")
+  })
+
   it("uses the active global config when no task override is selected", () => {
     expect(resolveTaskLlmConfig("chat", fallback, {}, {
       chatPresetId: null,

@@ -1,0 +1,27 @@
+# Project-scoped Codex integration for the local LLM Wiki desktop app.
+# Codex loads this file only after the repository is trusted.
+
+[mcp_servers.llm_wiki]
+command = "node"
+args = ["mcp-server/dist/src/index.js"]
+cwd = ".."
+env_vars = ["LLM_WIKI_API_TOKEN"]
+enabled = true
+required = false
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+default_tools_approval_mode = "prompt"
+
+# Deliberately read-oriented. Source rescan remains available in the server but
+# is omitted here because it changes project state and must be explicitly opted in.
+enabled_tools = [
+  "llm_wiki_status",
+  "llm_wiki_projects",
+  "llm_wiki_set_project",
+  "llm_wiki_files",
+  "llm_wiki_read_file",
+  "llm_wiki_reviews",
+  "llm_wiki_search",
+  "llm_wiki_chat",
+  "llm_wiki_graph",
+]

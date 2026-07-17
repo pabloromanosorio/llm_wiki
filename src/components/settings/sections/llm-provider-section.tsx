@@ -12,7 +12,7 @@ import { disabledLlmConfig, resolveConfig } from "../preset-resolver"
 import { normalizeEndpoint } from "@/lib/endpoint-normalizer"
 import { AZURE_OPENAI_API_VERSION } from "@/lib/azure-openai"
 import { testLlmConnection, testLlmFunction, type ProviderTestResult } from "@/lib/connection-tests"
-import { projectLlmProfile, resolveProjectLlmConfig } from "@/lib/llm-task-routing"
+import { projectLlmProfile, resolveProjectLlmConfig, taskLlmProfile } from "@/lib/llm-task-routing"
 import { saveProjectLlmOverride } from "@/lib/project-store"
 
 export function LlmProviderSection() {
@@ -95,9 +95,19 @@ export function LlmProviderSection() {
   }
 
   async function updateTaskRouting(task: "chat" | "ingest", value: string) {
+    const state = useWikiStore.getState()
+    const presetId = value || null
     const next = {
-      ...taskModelRouting,
-      [task === "chat" ? "chatPresetId" : "ingestPresetId"]: value || null,
+      ...state.taskModelRouting,
+      [task === "chat" ? "chatPresetId" : "ingestPresetId"]: presetId,
+      ...(task === "chat" ? {
+        chatProfile: taskLlmProfile(
+          presetId,
+          state.globalLlmConfig,
+          state.providerConfigs,
+          state.customLlmPresets,
+        ),
+      } : {}),
     }
     setTaskModelRouting(next)
     const { saveTaskModelRouting } = await import("@/lib/project-store")
@@ -135,9 +145,13 @@ export function LlmProviderSection() {
     if (state.activePresetId === id) return
     const nextPresets = state.customLlmPresets.filter((preset) => preset.id !== id)
     const { [id]: _removed, ...nextConfigs } = state.providerConfigs
+    const clearChat = state.taskModelRouting.chatPresetId === id
+    const clearIngest = state.taskModelRouting.ingestPresetId === id
     const nextRouting = {
-      chatPresetId: state.taskModelRouting.chatPresetId === id ? null : state.taskModelRouting.chatPresetId,
-      ingestPresetId: state.taskModelRouting.ingestPresetId === id ? null : state.taskModelRouting.ingestPresetId,
+      ...state.taskModelRouting,
+      chatPresetId: clearChat ? null : state.taskModelRouting.chatPresetId,
+      ingestPresetId: clearIngest ? null : state.taskModelRouting.ingestPresetId,
+      chatProfile: clearChat ? undefined : state.taskModelRouting.chatProfile,
     }
     setCustomLlmPresets(nextPresets)
     setProviderConfigs(nextConfigs)

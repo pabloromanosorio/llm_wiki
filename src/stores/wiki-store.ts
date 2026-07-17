@@ -337,6 +337,8 @@ export interface TaskModelRoutingConfig {
   chatPresetId: string | null
   /** Null keeps ingest on the globally active provider preset. */
   ingestPresetId: string | null
+  /** Non-secret resolved metadata used by native API/MCP chat callers. */
+  chatProfile?: Omit<LlmConfig, "apiKey">
 }
 
 export interface ProjectLlmOverride {

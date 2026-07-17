@@ -48,6 +48,23 @@ Example MCP client config:
 }
 ```
 
+### Codex project configuration
+
+This repository includes `.codex/config.toml`, which starts the built MCP server
+from the repository root and forwards `LLM_WIKI_API_TOKEN` from the environment.
+Build the server before starting Codex:
+
+```bash
+npm run mcp:build
+export LLM_WIKI_API_TOKEN=your-token
+codex
+```
+
+The token is optional when the desktop app allows unauthenticated local access.
+Codex loads project configuration only for trusted repositories. The checked-in
+allow-list excludes `llm_wiki_rescan_sources`; opt into that state-changing tool
+only for an explicit rescan task.
+
 When API unauthenticated mode is enabled, omit `LLM_WIKI_API_TOKEN`. If MCP access is disabled in Settings, `llm_wiki_status` still works for diagnosis but other tools return an explicit disabled error.
 
 ## Tools

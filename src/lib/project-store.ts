@@ -124,6 +124,7 @@ export async function loadTaskModelRouting(): Promise<TaskModelRoutingConfig | n
   return {
     chatPresetId: typeof saved.chatPresetId === "string" ? saved.chatPresetId : null,
     ingestPresetId: typeof saved.ingestPresetId === "string" ? saved.ingestPresetId : null,
+    chatProfile: saved.chatProfile && typeof saved.chatProfile === "object" ? saved.chatProfile : undefined,
   }
 }
 

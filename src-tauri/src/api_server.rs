@@ -1876,6 +1876,96 @@ fn project_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provide
     serde_json::from_value(profile).ok()
 }
 
+fn task_llm_config(
+    parsed: &Value,
+    preset_key: &str,
+    profile_key: &str,
+) -> Option<agent::provider::LlmConfig> {
+    let global = || {
+        parsed
+            .get("llmConfig")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+    };
+    let routing = parsed.get("taskModelRouting")?;
+    let Some(preset_id) = routing.get(preset_key).and_then(Value::as_str) else {
+        return global();
+    };
+    let Some(mut profile) = routing.get(profile_key).cloned() else {
+        // Older installations persisted only preset ids. Without the resolved
+        // non-secret profile, native code cannot safely infer the provider
+        // defaults maintained by the TypeScript preset registry.
+        return global();
+    };
+    if preset_id.starts_with("custom-") {
+        let exists = parsed
+            .get("customLlmPresets")
+            .and_then(Value::as_array)
+            .is_some_and(|presets| {
+                presets
+                    .iter()
+                    .any(|preset| preset.get("id").and_then(Value::as_str) == Some(preset_id))
+            });
+        if !exists {
+            return global();
+        }
+    }
+    let profile_object = profile.as_object_mut()?;
+    // Profiles are deliberately non-secret. Ignore a credential injected by
+    // malformed or legacy state and accept credentials only from the current
+    // provider configuration below.
+    profile_object.remove("apiKey");
+    if let Some(provider) = parsed
+        .get("providerConfigs")
+        .and_then(|value| value.get(preset_id))
+        .and_then(Value::as_object)
+    {
+        for key in [
+            "apiKey",
+            "apiMode",
+            "azureApiVersion",
+            "maxContextSize",
+            "reasoning",
+            "model",
+        ] {
+            if let Some(value) = provider.get(key) {
+                profile_object.insert(key.to_string(), value.clone());
+            }
+        }
+        if let Some(value) = provider.get("baseUrl") {
+            let endpoint_key =
+                if profile_object.get("provider").and_then(Value::as_str) == Some("ollama") {
+                    "ollamaUrl"
+                } else {
+                    "customEndpoint"
+                };
+            profile_object.insert(endpoint_key.to_string(), value.clone());
+        }
+    }
+    match serde_json::from_value::<agent::provider::LlmConfig>(profile) {
+        Ok(config)
+            if matches!(
+                config.provider.as_str(),
+                "openai" | "anthropic" | "google" | "azure" | "minimax" | "ollama" | "custom"
+            ) => Some(config),
+        _ => global(),
+    }
+}
+
+fn chat_task_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provider::LlmConfig> {
+    let has_project_override = parsed
+        .get("projectLlmOverrides")
+        .and_then(|value| value.get(project_id))
+        .and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if has_project_override {
+        project_llm_config(parsed, project_id)
+    } else {
+        task_llm_config(parsed, "chatPresetId", "chatProfile")
+    }
+}
+
 fn load_agent_runtime_config(app: &AppHandle, project_id: Option<&str>) -> AgentRuntimeConfig {
     let Some(parsed) = load_app_state(app) else {
         return AgentRuntimeConfig::default();
@@ -1886,7 +1976,7 @@ fn load_agent_runtime_config(app: &AppHandle, project_id: Option<&str>) -> Agent
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok()),
         llm: project_id
-            .and_then(|id| project_llm_config(&parsed, id))
+            .and_then(|id| chat_task_llm_config(&parsed, id))
             .or_else(|| {
                 parsed
                     .get("llmConfig")
@@ -2913,5 +3003,58 @@ mod tests {
         assert_eq!(config.model, "live-model");
         assert_eq!(config.api_key, "live-secret");
         assert_eq!(config.custom_endpoint, "https://live.example/v1");
+    }
+
+    #[test]
+    fn chat_task_llm_config_uses_persisted_profile_with_current_provider_settings() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "providerConfigs": {
+                "openai": { "apiKey": "current-key", "model": "gpt-4o-mini" }
+            },
+            "taskModelRouting": {
+                "chatPresetId": "openai",
+                "ingestPresetId": null,
+                "chatProfile": { "provider": "openai", "model": "gpt-4o", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 128000 }
+            }
+        });
+
+        let config = chat_task_llm_config(&state, "project-a").expect("chat config");
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model, "gpt-4o-mini");
+        assert_eq!(config.api_key, "current-key");
+    }
+
+    #[test]
+    fn chat_task_llm_config_never_trusts_credentials_in_persisted_profile() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "taskModelRouting": {
+                "chatPresetId": "openai",
+                "chatProfile": { "provider": "openai", "apiKey": "stale-secret", "model": "gpt-4o-mini", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 128000 }
+            }
+        });
+
+        let config = chat_task_llm_config(&state, "project-a").expect("chat config");
+        assert_eq!(config.api_key, "");
+        assert_eq!(config.model, "gpt-4o-mini");
+    }
+
+    #[test]
+    fn chat_task_llm_config_keeps_usable_global_model_for_frontend_only_cli_profile() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "providerConfigs": {
+                "codex-cli": { "model": "gpt-5.4-mini" }
+            },
+            "taskModelRouting": {
+                "chatPresetId": "codex-cli",
+                "chatProfile": { "provider": "codex-cli", "model": "gpt-5.4", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 200000 }
+            }
+        });
+
+        let config = chat_task_llm_config(&state, "project-a").expect("chat config");
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model, "gpt-global");
     }
 }

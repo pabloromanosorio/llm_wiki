@@ -35,6 +35,18 @@ export function projectLlmProfile(config: LlmConfig): Omit<LlmConfig, "apiKey"> 
   return profile
 }
 
+export function taskLlmProfile(
+  presetId: string | null,
+  fallback: LlmConfig,
+  providerConfigs: ProviderConfigs,
+  customPresets: CustomLlmPreset[] = [],
+): Omit<LlmConfig, "apiKey"> | undefined {
+  if (!presetId) return undefined
+  const preset = findLlmPreset(presetId, customPresets)
+  if (!preset) return undefined
+  return projectLlmProfile(resolveConfig(preset, providerConfigs[presetId], fallback))
+}
+
 /**
  * Resolve a task-specific provider from the current preset overrides.
  * Routing stores preset ids rather than credential snapshots so API-key,
