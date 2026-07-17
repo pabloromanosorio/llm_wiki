@@ -29,3 +29,13 @@ enabled_tools = [
 # read and project-selection tools above may run without an extra prompt.
 [mcp_servers.llm_wiki.tools.llm_wiki_chat]
 approval_mode = "prompt"
+
+# Optional external repository orientation. Keep disabled for ordinary work;
+# enable it only while a separately managed OpenDeepWiki service is running.
+[mcp_servers.opendeepwiki]
+url = "http://127.0.0.1:8080/api/mcp"
+enabled = false
+required = false
+startup_timeout_sec = 10
+tool_timeout_sec = 180
+default_tools_approval_mode = "prompt"

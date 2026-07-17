@@ -69,6 +69,34 @@ Codex loads project configuration only for trusted repositories. The checked-in
 allow-list excludes `llm_wiki_rescan_sources`; opt into that state-changing tool
 only for an explicit rescan task.
 
+### Optional OpenDeepWiki adjunct
+
+The project configuration also declares the separately managed OpenDeepWiki
+global MCP endpoint at `http://127.0.0.1:8080/api/mcp`. It is disabled by
+default: ordinary Codex work must not start repository processing, wait for an
+absent service, or trigger provider spend.
+
+After starting and configuring OpenDeepWiki independently, enable the endpoint
+for one repository-analysis session:
+
+```bash
+codex -C /absolute/path/to/llm_wiki \
+  -c 'mcp_servers.opendeepwiki.enabled=true'
+```
+
+For exact source reads, OpenDeepWiki also exposes a repository-scoped endpoint:
+`http://127.0.0.1:8080/api/mcp/{owner}/{repo}`. Prefer the actual local checkout
+at the repository page's `pinned_commit` for final verification. Generated docs
+remain non-canonical, and selected durable findings return through Nashsu's
+normal Review flow rather than being bulk-copied.
+
+This contract was checked against AIDotNet/OpenDeepWiki commit
+`2940a6eb5e90447d57273883330c48b05ab8dfdd` (2026-07-15). That revision's global
+MCP exposes repository listing/routing and generated-document search/read; its
+repository-scoped MCP adds documentation search, directory structure, and
+source-file reads. OpenDeepWiki installation, credentials, data, and model costs
+remain outside this repository.
+
 When API unauthenticated mode is enabled, omit `LLM_WIKI_API_TOKEN`. If MCP access is disabled in Settings, `llm_wiki_status` still works for diagnosis but other tools return an explicit disabled error.
 
 ## Tools

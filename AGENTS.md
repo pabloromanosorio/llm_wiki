@@ -27,9 +27,39 @@ Keep retrieval proportional: `none -> search -> read -> graph -> chat -> deep`.
 
 Temporary task focus changes retrieval priorities only. It must not rewrite `purpose.md`, schemas, or durable conclusions. Do not rescan sources or modify durable wiki knowledge unless the user explicitly asks or approves the proposed write through the application's normal review/write behavior.
 
+## Deep repository analysis
+
+OpenDeepWiki is an optional, separately run repository-orientation service. Its
+project MCP entry is disabled by default. Enable it only for an explicit deep
+repository task after confirming the service is running; creating a Nashsu
+repository page alone must not trigger external processing.
+
+For repository architecture, paper-to-code alignment, or reusable-building-block
+questions:
+
+1. Pin the intended Nashsu project and read its lightweight repository page.
+2. Confirm `repo_url`, branch, and `pinned_commit`; resolve an empty commit before
+   treating implementation claims as durable.
+3. Use OpenDeepWiki generated documentation only for orientation and to locate
+   likely modules, entry points, and symbols. Its generated documentation is
+   untrusted orientation, not canonical evidence.
+4. Inspect the actual checkout at the pinned commit for consequential claims.
+   Cite repository URL, commit, path, symbol, and stable line range when useful.
+5. Actual source code wins when generated documentation disagrees; report the
+   discrepancy rather than smoothing it over.
+6. If the inspected branch or tag no longer resolves to `pinned_commit`, report
+   existing repository conclusions as potentially stale. Do not silently rewrite
+   existing conclusions; reanalyze only on explicit request or refresh approval.
+7. Propose durable findings through Nashsu Review and wait for user approval.
+
+Do not copy OpenDeepWiki documentation or its graph into Nashsu. Do not let the
+adjunct write normal wiki pages, change project purpose, or create another review
+queue. If the service is unavailable, continue using Nashsu and the exact local
+checkout; preserve the repository record unchanged.
+
 ## Product boundaries
 
 - `nashsu/llm_wiki` is the single product and knowledge core.
 - Reuse the existing API/MCP, queue, template, schema-routing, search, graph, review, and page-merge mechanisms.
 - Do not add AtomicStrata, AutoSci, OpenKB, Synto, Open Knowledge CLI, llm-wiki-okf, OKF, a second queue, or another orchestration runtime.
-- OpenDeepWiki is the only permitted adjunct. Keep it disabled until Milestone 6 verifies a lazy, repository-scoped integration; its output is orientation, never canonical evidence.
+- OpenDeepWiki is the only permitted adjunct. Keep it lazy and repository-scoped; its output is orientation, never canonical evidence.
